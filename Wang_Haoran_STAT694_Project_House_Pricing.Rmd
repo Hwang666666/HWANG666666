@@ -1,0 +1,224 @@
+---
+title: "STAT694_project_House_Pricing"
+author: "Haoran Wang"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+## Part 1 Introduction
+
+##Ask a home buyer to describe their dream house, and they probably won’t begin with the height of the basement ceiling or the proximity to an east-west railroad. But this playground competition’s dataset proves that much more influences price negotiations than the number of bedrooms or a white-picket fence. With 79 explanatory variables describing (almost) every aspect of residential homes in Ames, Iowa, this competition challenges you to predict the final price of each home.
+##Here is the Kaggle link: https://www.kaggle.com/c/house-prices-advanced-regression-techniques/data
+
+##Part 2 Loading and Exploring Data
+
+##Loading libraries required and reading the data into R
+
+```{r}
+#Loading R packages
+library(knitr)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(corrplot)
+library(caret)
+library(gridExtra)
+library(scales)
+library(Rmisc)
+library(ggrepel)
+library(randomForest)
+library(xgboost)
+library(GGally)
+```
+
+
+
+
+```{r}
+train <- read.csv("train.csv")
+head(train)  ##display first 5 variables and the response variable
+```
+
+##Data size and structure
+
+##The train dataset consist of character and integer variables. Most of the character variables are actually (ordinal) factors, but I chose to read them into R as character strings as most of them require cleaning and/or feature engineering first. In total, there are 81 columns/variables, of which the last one is the response variable (SalePrice).
+
+```{r}
+dim(train)
+```
+
+
+```{r}
+str(train)
+```
+
+```{r}
+ggplot(data=train[!is.na(train$SalePrice),], aes(x=SalePrice)) +
+        geom_histogram(fill="blue", binwidth = 10000) +
+        scale_x_continuous(breaks= seq(0, 800000, by=100000), labels = comma) #the sale prices are right skewed
+```
+
+##According the plot, we can find the sale prices are right skewed. Most of people tend to but a cheap house so it is resonable.
+
+```{r}
+summary(train$SalePrice)
+```
+
+
+##Part 3 Exploring some of the most important variables
+
+
+##first we should find which numeric variables have a high correlation with the SalePrice.
+## In fact, 6 factors that influence a home's value. Factors to consider when pricing a home are: historic sales price, quality of the neighborhood, the market, nearby features and the size, appeal, age and condition of the home. ##The we will dine correlations with SalePrice
+
+
+```{r}
+numericVars <- which(sapply(train, is.numeric)) #index vector numeric variables
+numericVarNames <- names(numericVars) #saving names vector for use later on
+cat('There are', length(numericVars), 'numeric variables')
+```
+```{r}
+all_numVar <- train[, numericVars]
+cor_numVar <- cor(all_numVar, use="pairwise.complete.obs") #correlations of all numeric variables
+
+#sort on decreasing correlations with SalePrice
+cor_sorted <- as.matrix(sort(cor_numVar[,'SalePrice'], decreasing = TRUE))
+ #select only high corelations
+CorHigh <- names(which(apply(cor_sorted, 1, function(x) abs(x)>0.5)))
+cor_numVar <- cor_numVar[CorHigh, CorHigh]
+
+corrplot.mixed(cor_numVar, tl.col="black", tl.pos = "lt")
+```
+
+##Overall Quality has the highest correlation with SalePrice among the numeric variables (0.79). It rates the overall material and finish of the house on a scale from 1 (very poor) to 10 (very excellent).
+
+```{r}
+pairs(SalePrice ~ OverallQual + GrLivArea + GarageCars + GarageArea + TotalBsmtSF +X1stFlrSF + FullBath+ TotRmsAbvGrd +YearBuilt +YearRemodAdd, data=train)
+```
+
+```{r}
+ggplot(data=train[!is.na(train$SalePrice),], aes(x=factor(OverallQual), y=SalePrice))+
+        geom_boxplot(col='blue') + labs(x='Overall Quality') +
+        scale_y_continuous(breaks= seq(0, 800000, by=100000), labels = comma)
+```
+
+##The positive correlation is certainly there indeed, and seems to be a slightly upward curve. Regarding outliers, I do not see any extreme values.
+
+
+
+## part 4 Liner regression model 
+## according previous output, we will creat our fist regression linear moderl
+
+```{r}
+model1 <- lm(SalePrice ~ OverallQual + GrLivArea + GarageCars + GarageArea + TotalBsmtSF +X1stFlrSF + FullBath+ TotRmsAbvGrd +YearBuilt +YearRemodAdd, data=train) 
+summary(model1)
+```
+
+##According STAT632 knowlwdge, we will remove variables which are not significant by p-value. First we will remove TotRmsAbvGrd due to pvalue is 0.976404 large than 0.05. Then we will get second model
+
+
+```{r}
+model2 <- lm(SalePrice ~ OverallQual + GrLivArea + GarageCars + GarageArea + TotalBsmtSF +X1stFlrSF + FullBath +YearBuilt +YearRemodAdd, data=train) 
+summary(model2)
+```
+
+##next we will remove GarageArea due to pvalue is 0.146838 large than 0.05. Then we will get 3ed model
+
+```{r}
+model3 <- lm(SalePrice ~ OverallQual + GrLivArea + GarageCars  + TotalBsmtSF +X1stFlrSF + FullBath +YearBuilt +YearRemodAdd, data=train) 
+summary(model3)
+```
+
+##model 3 looks better, all variables are significant 
+
+
+```{r}
+par(mfrow=c(1,2), cex=0.6) 
+plot(model3, 1:2)  #check assumption
+```
+
+
+```{r}
+summary(model3)$adj.r.squared
+```
+
+```{r}
+q1 <- ggplot(train, aes(OverallQual,SalePrice)) + 
+  geom_point()
+q2 <- ggplot(train, aes( GrLivArea,SalePrice)) + 
+  geom_point()
+q3 <- ggplot(train, aes( GarageCars,SalePrice)) + 
+  geom_point()
+q4 <- ggplot(train, aes( GarageArea,SalePrice)) + 
+  geom_point()
+q5 <- ggplot(train, aes( YearRemodAdd,SalePrice)) + 
+  geom_point() 
+  
+q6 <- ggplot(train, aes( X1stFlrSF,SalePrice)) + 
+  geom_point()
+q7 <- ggplot(train, aes( FullBath,SalePrice)) + 
+  geom_point()
+q8 <- ggplot(train, aes( TotRmsAbvGrd,SalePrice)) + 
+  geom_point()
+
+
+layout <- matrix(c(1,2,3,4,5,9,6,7,8),3,3,byrow=TRUE)
+multiplot(q1, q2, q3, q4, q5, q6, q7,q8, layout=layout)
+
+```
+
+##Overall Quality is very important, and also more granular than the other variables. 
+##Most of house has 1 to 2 bath room, it is different out recently market, may be because their bulid year is old. 
+
+##now we are analyze two main factors : OverallQual ,GrLivArea.
+
+```{r}
+train2 <- select(train,  SalePrice, OverallQual ,GrLivArea)
+head(train2) #new data set 
+```
+
+```{r}
+ggplot(train2, aes(SalePrice, GrLivArea)) + 
+  geom_point()
+```
+
+```{r}
+ggplot(train2, aes(SalePrice, OverallQual)) + 
+  geom_point()
+```
+
+
+```{r}
+ggplot(train2, aes(SalePrice, GrLivArea, colour = OverallQual)) + 
+  geom_point()
+```
+
+
+##let we use "filter" function, and then find all obs which OverallQual == 5, then we will analye the SalePrice and GrLivArea. We also can use other levels OverallQual
+
+
+```{r}
+train3 <- filter(train2,   OverallQual == 8)
+ggplot(train3, aes(GrLivArea,SalePrice)) + 
+  geom_point()
+```
+
+```{r}
+train4 <- filter(train2,   OverallQual == 7)
+ggplot(train4, aes(GrLivArea,SalePrice)) + 
+  geom_point()
+```
+
+
+
+```{r}
+train5 <- filter(train2,   OverallQual == 5)
+ggplot(train5, aes( GrLivArea,SalePrice)) + 
+  geom_point()
+```
+
+##According output plots, we can simply say in higl level OverallQual property, Salesprice has stronger liner relationship with Grlivearea. 
+
+## Summary: In this project, I tried to find the most siginificant factors and creat a regression model. Of course, a house pricing can not only calculate by a few factors. There are so may factors may influence market price. But I reviewed linear regression and data visualization via this projet, it is a good experience for me. 
